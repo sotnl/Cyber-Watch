@@ -1,7 +1,3 @@
-/* =========================================
-   CYBER SECURITY DASHBOARD SYSTEM
-========================================= */
-
 /* LIVE CLOCK */
 
 function updateClock() {
