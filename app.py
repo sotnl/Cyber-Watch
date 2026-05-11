@@ -1,24 +1,35 @@
-from flask import Flask, render_template, request, redirect, session, Response
+from flask import Flask, render_template, request, redirect, session, Response, make_response
 from database import get_connection
-from werkzeug.security import check_password_hash
-from datetime import timedelta
+from datetime import datetime, timedelta
+import uuid
 import cv2
+
 import blocker
 import detector
 
 app = Flask(__name__)
-app.secret_key = "secret_key_123"
+app.secret_key = "Group7_netad"
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(minutes=30)
 
 
-def save_log(ip, event_type, status):
+def get_device_id():
+    device_id = request.cookies.get("device_id")
+    if not device_id:
+        device_id = str(uuid.uuid4())
+    return device_id
+
+
+def save_log(device_id, event_type, status):
     conn = get_connection()
     cursor = conn.cursor()
+
+    philippines_time = datetime.utcnow() + timedelta(hours=8)
+
     try:
         cursor.execute("""
-            INSERT INTO security_logs (ip, event_type, status, created_at)
-            VALUES (%s, %s, %s, CURRENT_TIMESTAMP)
-        """, (ip, event_type, status))
+            INSERT INTO security_logs (device_id, event_type, status, created_at)
+            VALUES (%s, %s, %s, %s)
+        """, (device_id, event_type, status, philippines_time))
         conn.commit()
     except:
         conn.rollback()
@@ -28,10 +39,10 @@ def save_log(ip, event_type, status):
 
 @app.route("/", methods=["GET", "POST"])
 def login():
-    ip = request.remote_addr
+    device_id = get_device_id()
 
-    if blocker.is_blocked(ip):
-        return "Access Denied: Your IP is permanently blocked.", 403
+    if blocker.is_blocked(device_id):
+        return "Access Denied: Your device is permanently blocked.", 403
 
     if request.method == "POST":
         username = request.form["username"].strip()
@@ -52,25 +63,24 @@ def login():
             session.permanent = True
             session["user"] = username
 
-            detector.clear_failed_attempts(ip)
+            detector.clear_failed_attempts(device_id)
 
-            save_log(ip, f"Login Success: {username}", "SUCCESS")
-            return redirect("/dashboard")
+            save_log(device_id, f"Login Success: {username}", "SUCCESS")
 
-        else:
-            save_log(ip, f"Login Failed: {username}", "FAILED")
+            resp = make_response(redirect("/dashboard"))
+            resp.set_cookie("device_id", device_id, max_age=60*60*24*365)
+            return resp
 
-            detector.register_failed_attempt(ip)
+        save_log(device_id, f"Login Failed: {username}", "FAILED")
+        detector.register_failed_attempt(device_id)
 
-            if detector.detect_attack(ip):
-                blocker.block_ip(ip, "Brute force detected")
+        if detector.detect_attack(device_id):
+            blocker.block_device(device_id, "Brute force detected")
+            save_log(device_id, "Brute Force Detected", "ALERT")
+            save_log(device_id, "DEVICE BLOCKED", "BLOCKED")
+            return "Security Alert: Device Blocked.", 403
 
-                save_log(ip, "Brute Force Detected", "ALERT")
-                save_log(ip, "IP BLOCKED", "BLOCKED")
-
-                return "Security Alert: IP Blocked.", 403
-
-            return "Invalid login"
+        return "Invalid login"
 
     return render_template("login.html")
 
@@ -93,7 +103,7 @@ def dashboard():
     unique_attackers = cursor.fetchone()[0]
 
     cursor.execute("""
-        SELECT ip, event_type, status, created_at
+        SELECT device_id, event_type, status, created_at
         FROM security_logs
         ORDER BY created_at DESC
         LIMIT 7
@@ -128,10 +138,9 @@ def threat_logs():
     cursor = conn.cursor()
 
     cursor.execute("""
-        SELECT ip, event_type, status, created_at
+        SELECT device_id, event_type, status, created_at
         FROM security_logs
         ORDER BY created_at DESC
-        LIMIT 50
     """)
 
     logs = cursor.fetchall()
