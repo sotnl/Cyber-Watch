@@ -40,6 +40,12 @@
 
         <form method="POST">
 
+            {% if error %}
+                <div style="color: #ff4d4d; background-color: rgba(255, 77, 77, 0.1); border: 1px solid #ff4d4d; padding: 10px; border-radius: 4px; margin-bottom: 20px; text-align: center; font-family: 'Inter', sans-serif; font-size: 14px;">
+                    {{ error }}
+                </div>
+            {% endif %}
+
             <div class="input-group">
                 <label>USERNAME</label>
                 <input type="text" name="username" placeholder="Enter username" required>
