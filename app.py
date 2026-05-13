@@ -3,7 +3,6 @@ from database import get_connection
 from datetime import datetime, timedelta
 import uuid
 import threading
-
 import blocker
 import detector
 
@@ -11,19 +10,22 @@ app = Flask(__name__)
 app.secret_key = "Group7_netad"
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(minutes=30)
 
-# --- Camera streaming globals ---
+
 latest_frame = None
 frame_lock = threading.Lock()
 
-
 def get_device_id():
+
     device_id = request.cookies.get("device_id")
+
     if not device_id:
         device_id = str(uuid.uuid4())
+
     return device_id
 
 
 def save_log(device_id, event_type, status):
+
     conn = get_connection()
     cursor = conn.cursor()
 
@@ -31,79 +33,168 @@ def save_log(device_id, event_type, status):
 
     try:
         cursor.execute("""
-            INSERT INTO security_logs (device_id, event_type, status, created_at)
+            INSERT INTO security_logs
+            (device_id, event_type, status, created_at)
             VALUES (%s, %s, %s, %s)
-        """, (device_id, event_type, status, philippines_time))
+        """, (
+            device_id,
+            event_type,
+            status,
+            philippines_time
+        ))
+
         conn.commit()
+
     except:
         conn.rollback()
+
     finally:
         conn.close()
 
 
 @app.route("/", methods=["GET", "POST"])
 def login():
+
     device_id = get_device_id()
 
     if blocker.is_blocked(device_id):
         return "Access Denied: Your device is permanently blocked.", 403
 
     if request.method == "POST":
+
         username = request.form["username"].strip()
         password = request.form["password"].strip()
 
         conn = get_connection()
         cursor = conn.cursor()
 
-        cursor.execute(
-            "SELECT username, password FROM users WHERE username=%s",
-            (username,)
-        )
+        cursor.execute("""
+            SELECT username, password
+            FROM users
+            WHERE username=%s
+        """, (username,))
 
         user = cursor.fetchone()
+
         conn.close()
 
         if user and user[1] == password:
+
             session.permanent = True
             session["user"] = username
 
             detector.clear_failed_attempts(device_id)
 
-            save_log(device_id, f"Login Success: {username}", "SUCCESS")
+            save_log(
+                device_id,
+                f"Login Success: {username}",
+                "SUCCESS"
+            )
 
-            resp = make_response(redirect("/dashboard"))
-            resp.set_cookie("device_id", device_id, max_age=60*60*24*365)
-            return resp
+            response = make_response(
+                redirect("/dashboard")
+            )
 
-        save_log(device_id, f"Login Failed: {username}", "FAILED")
+            response.set_cookie(
+                "device_id",
+                device_id,
+                max_age=60 * 60 * 24 * 365,
+                httponly=True,
+                samesite="Lax"
+            )
+
+            return response
+
+        save_log(
+            device_id,
+            f"Login Failed: {username}",
+            "FAILED"
+        )
+
         detector.register_failed_attempt(device_id)
 
         if detector.detect_attack(device_id):
-            blocker.block_device(device_id, "Brute force detected")
-            save_log(device_id, "Brute Force Detected", "ALERT")
-            save_log(device_id, "DEVICE BLOCKED", "BLOCKED")
+
+            blocker.block_device(
+                device_id,
+                "Brute force detected"
+            )
+
+            save_log(
+                device_id,
+                "Brute Force Detected",
+                "ALERT"
+            )
+
+            save_log(
+                device_id,
+                "DEVICE BLOCKED",
+                "BLOCKED"
+            )
+
             return "Security Alert: Device Blocked.", 403
 
-        return "Invalid login"
+        response = make_response(
+            render_template(
+                "login.html",
+                error="Invalid username or password."
+            )
+        )
 
-    return render_template("login.html")
+        response.set_cookie(
+            "device_id",
+            device_id,
+            max_age=60 * 60 * 24 * 365,
+            httponly=True,
+            samesite="Lax"
+        )
+
+        return response
+
+    response = make_response(
+        render_template("login.html")
+    )
+
+    response.set_cookie(
+        "device_id",
+        device_id,
+        max_age=60 * 60 * 24 * 365,
+        httponly=True,
+        samesite="Lax"
+    )
+
+    return response
 
 
 @app.route("/dashboard")
 def dashboard():
+
     if "user" not in session:
         return redirect("/")
 
     conn = get_connection()
     cursor = conn.cursor()
 
-    cursor.execute("SELECT COUNT(*) FROM security_logs WHERE status='SUCCESS' AND created_at >= CURRENT_DATE")
+    cursor.execute("""
+        SELECT COUNT(*)
+        FROM security_logs
+        WHERE status='SUCCESS'
+        AND created_at >= CURRENT_DATE
+    """)
     today_access = cursor.fetchone()[0]
 
-    cursor.execute("SELECT COUNT(*) FROM security_logs WHERE status='FAILED' AND created_at >= CURRENT_DATE")
+    cursor.execute("""
+        SELECT COUNT(*)
+        FROM security_logs
+        WHERE status='FAILED'
+        AND created_at >= CURRENT_DATE
+    """)
     unauthorized = cursor.fetchone()[0]
 
-    cursor.execute("SELECT COUNT(*) FROM blocked_ips")
+    cursor.execute("""
+        SELECT COUNT(*)
+        FROM blocked_devices
+    """)
     unique_attackers = cursor.fetchone()[0]
 
     cursor.execute("""
@@ -128,13 +219,19 @@ def dashboard():
 
 @app.route("/live-cctv")
 def live_cctv():
+
     if "user" not in session:
         return redirect("/")
-    return render_template("live_cctv.html", user=session["user"])
+
+    return render_template(
+        "live_cctv.html",
+        user=session["user"]
+    )
 
 
 @app.route("/threat-logs")
 def threat_logs():
+
     if "user" not in session:
         return redirect("/")
 
@@ -145,29 +242,47 @@ def threat_logs():
         SELECT device_id, event_type, status, created_at
         FROM security_logs
         ORDER BY created_at DESC
+        LIMIT 50
     """)
 
     logs = cursor.fetchall()
+
     conn.close()
 
-    return render_template("threat_logs.html", user=session["user"], logs=logs)
+    return render_template(
+        "threat_logs.html",
+        user=session["user"],
+        logs=logs
+    )
 
 
 @app.route("/analytics")
 def analytics():
+
     if "user" not in session:
         return redirect("/")
 
     conn = get_connection()
     cursor = conn.cursor()
 
-    cursor.execute("SELECT COUNT(*) FROM security_logs WHERE status='SUCCESS'")
+    cursor.execute("""
+        SELECT COUNT(*)
+        FROM security_logs
+        WHERE status='SUCCESS'
+    """)
     success_count = cursor.fetchone()[0]
 
-    cursor.execute("SELECT COUNT(*) FROM security_logs WHERE status='FAILED'")
+    cursor.execute("""
+        SELECT COUNT(*)
+        FROM security_logs
+        WHERE status='FAILED'
+    """)
     failed_count = cursor.fetchone()[0]
 
-    cursor.execute("SELECT COUNT(*) FROM blocked_ips")
+    cursor.execute("""
+        SELECT COUNT(*)
+        FROM blocked_devices
+    """)
     blocked_count = cursor.fetchone()[0]
 
     conn.close()
@@ -181,7 +296,6 @@ def analytics():
     )
 
 
-# --- Receives frames from local stream.py script ---
 @app.route("/upload_frame", methods=["POST"])
 def upload_frame():
     global latest_frame
@@ -212,9 +326,17 @@ def video_feed():
 
 @app.route("/logout")
 def logout():
-    session.clear()
-    return redirect("/")
 
+    session.clear()
+
+    response = make_response(
+        redirect("/")
+    )
+
+    return response
+
+
+import atexit
 
 if __name__ == "__main__":
     app.run(debug=True, use_reloader=False)
