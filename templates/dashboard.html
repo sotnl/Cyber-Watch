@@ -91,7 +91,7 @@
                 </div>
 
                 <div class="camera-wrapper">
-                    <video id="remoteVideo" autoplay playsinline class="camera-feed"></video>
+                    <video id="remoteVideo" autoplay muted playsinline class="camera-feed"></video>
                 </div>
 
             </div>
@@ -138,6 +138,22 @@
 </div>
 
 <script src="{{ url_for('static', filename='dashboard.js') }}"></script>
+
+<script>
+async function startCamera() {
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+            video: { width: 1280, height: 720 },
+            audio: false
+        });
+        document.getElementById("remoteVideo").srcObject = stream;
+        document.getElementById("camera-status").textContent = "CAMERA ONLINE";
+    } catch (err) {
+        document.getElementById("camera-status").textContent = "CAMERA OFFLINE";
+    }
+}
+startCamera();
+</script>
 
 </body>
 </html>
