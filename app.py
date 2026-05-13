@@ -176,48 +176,35 @@ def analytics():
         blocked_count=blocked_count
     )
 
+import threading
 
-camera = cv2.VideoCapture(0)
-camera.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+latest_frame = None
+frame_lock = threading.Lock()
+
+
+@app.route("/upload_frame", methods=["POST"])
+def upload_frame():
+    global latest_frame
+    data = request.data
+    with frame_lock:
+        latest_frame = data
+    return "OK", 200
 
 
 def generate_frames():
+    global latest_frame
     while True:
-        success, frame = camera.read()
-        if not success:
+        with frame_lock:
+            frame = latest_frame
+        if frame is None:
             continue
-
-        _, buffer = cv2.imencode('.jpg', frame)
-        frame_bytes = buffer.tobytes()
-
         yield (b'--frame\r\n'
-               b'Content-Type: image/jpeg\r\n\r\n' +
-               frame_bytes +
-               b'\r\n')
+               b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
 
 
 @app.route("/video_feed")
 def video_feed():
     if "user" not in session:
         return "Unauthorized", 403
-
     return Response(generate_frames(),
                     mimetype='multipart/x-mixed-replace; boundary=frame')
-
-
-@app.route("/logout")
-def logout():
-    session.clear()
-    return redirect("/")
-
-
-import atexit
-
-@atexit.register
-def release_camera():
-    camera.release()
-
-
-if __name__ == "__main__":
-    app.run(debug=True, use_reloader=False)
