@@ -80,7 +80,7 @@ def login():
             save_log(device_id, "DEVICE BLOCKED", "BLOCKED")
             return "Security Alert: Device Blocked.", 403
 
-        return "Invalid login"
+        return render_template("login.html", error="Invalid username or password.")
 
     return render_template("login.html")
 
