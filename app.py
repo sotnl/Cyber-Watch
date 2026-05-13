@@ -2,7 +2,7 @@ from flask import Flask, render_template, request, redirect, session, Response, 
 from database import get_connection
 from datetime import datetime, timedelta
 import uuid
-import cv2
+import threading
 import blocker
 import detector
 
@@ -10,6 +10,9 @@ app = Flask(__name__)
 app.secret_key = "Group7_netad"
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(minutes=30)
 
+
+latest_frame = None
+frame_lock = threading.Lock()
 
 def get_device_id():
 
@@ -75,7 +78,6 @@ def login():
 
         conn.close()
 
-        # SUCCESS LOGIN
         if user and user[1] == password:
 
             session.permanent = True
@@ -103,7 +105,6 @@ def login():
 
             return response
 
-        # FAILED LOGIN
         save_log(
             device_id,
             f"Login Failed: {username}",
@@ -295,43 +296,32 @@ def analytics():
     )
 
 
-camera = cv2.VideoCapture(0)
-
-camera.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+@app.route("/upload_frame", methods=["POST"])
+def upload_frame():
+    global latest_frame
+    data = request.data
+    with frame_lock:
+        latest_frame = data
+    return "OK", 200
 
 
 def generate_frames():
-
+    global latest_frame
     while True:
-
-        success, frame = camera.read()
-
-        if not success:
+        with frame_lock:
+            frame = latest_frame
+        if frame is None:
             continue
-
-        _, buffer = cv2.imencode('.jpg', frame)
-
-        frame_bytes = buffer.tobytes()
-
-        yield (
-            b'--frame\r\n'
-            b'Content-Type: image/jpeg\r\n\r\n' +
-            frame_bytes +
-            b'\r\n'
-        )
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
 
 
 @app.route("/video_feed")
 def video_feed():
-
     if "user" not in session:
         return "Unauthorized", 403
-
-    return Response(
-        generate_frames(),
-        mimetype='multipart/x-mixed-replace; boundary=frame'
-    )
+    return Response(generate_frames(),
+                    mimetype='multipart/x-mixed-replace; boundary=frame')
 
 
 @app.route("/logout")
@@ -347,12 +337,6 @@ def logout():
 
 
 import atexit
-
-
-@atexit.register
-def release_camera():
-    camera.release()
-
 
 if __name__ == "__main__":
     app.run(debug=True, use_reloader=False)
