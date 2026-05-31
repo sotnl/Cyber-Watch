@@ -24,9 +24,6 @@ frame_lock = threading.Lock()
 # Each entry: { "name": "<label>", "url": "<MJPEG or snapshot URL>" }
 CAMERAS = [
     {"name": "Main Entrance",  "url": "http://192.168.1.101/video"},
-    {"name": "Hallway Cam",    "url": "http://192.168.1.102/video"},
-    {"name": "Parking Lot",    "url": "http://192.168.1.103/video"},
-    {"name": "Server Room",    "url": "http://192.168.1.104/video"},
 ]
 # ───────────────────────────────────────────────────────────────────────────
 
